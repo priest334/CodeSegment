@@ -1,0 +1,115 @@
+DWORD GetProcessName(LPTSTR lpBuffer, DWORD dwBuffer) {
+	return GetModuleFileNameEx(GetCurrentProcess(), NULL, lpBuffer, dwBuffer);
+}
+
+HANDLE GetProcessToken(LPCTSTR lpszProcessName) {
+	HANDLE hProcSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (INVALID_HANDLE_VALUE == hProcSnapshot)
+		return NULL;
+
+	PROCESSENTRY32 pe32;
+	pe32.dwSize = sizeof(PROCESSENTRY32);
+	if (!Process32First(hProcSnapshot, &pe32)) {
+		CloseHandle(hProcSnapshot);
+		return NULL;
+	}
+
+	HANDLE hDupToken = NULL, hToken, hProcess;
+
+	do {
+		if (0 != _tcsicmp(lpszProcessName, pe32.szExeFile))
+			continue;
+		hProcess = OpenProcess(PROCESS_ALL_ACCESS, TRUE, pe32.th32ProcessID);
+		if (NULL == hProcess)
+			continue;
+		if (OpenProcessToken(hProcess, TOKEN_ALL_ACCESS, &hToken)) {
+			DuplicateTokenEx(hToken, 0, NULL, SecurityImpersonation, TokenPrimary, &hDupToken);
+			CloseHandle(hToken);
+		}
+		CloseHandle(hProcess);
+	} while (!hDupToken && Process32Next(hProcSnapshot, &pe32));
+
+	return hDupToken;
+}
+
+BOOL SetPriviledge(HANDLE hToken, LPCTSTR lpszPriviledge, BOOL bEnablePriviledge) {
+	TOKEN_PRIVILEGES tp;
+	LUID luid;
+
+	if (!LookupPrivilegeValue(NULL, lpszPriviledge, &luid))
+		return FALSE;
+
+	tp.PrivilegeCount = 1;
+	tp.Privileges[0].Luid = luid;
+	tp.Privileges[0].Attributes = bEnablePriviledge ? SE_PRIVILEGE_ENABLED : 0;
+
+	if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL))
+		return FALSE;
+
+	return !(ERROR_NOT_ALL_ASSIGNED == GetLastError());
+}
+
+int StartWithAdminPriviledge() {
+	TCHAR szProcessName[MAX_PATH] = { 0 };
+	GetProcessName(szProcessName, MAX_PATH);
+
+	TCHAR szPath[MAX_PATH] = { 0 };
+	PathAppend(szPath, szProcessName);
+	PathRemoveFileSpec(szPath);
+	ShellExecute(NULL, _T("runas"), szProcessName, NULL, szPath, SW_SHOWDEFAULT);
+	return 0;
+	/*
+	HANDLE hExplorer = GetProcessToken(_T("explorer.exe"));
+	if (NULL == hExplorer)
+		return -1;
+
+	STARTUPINFO si;
+	PROCESS_INFORMATION pi;
+
+	ZeroMemory(&si, sizeof(STARTUPINFO));
+	si.cb = sizeof(STARTUPINFO);
+	ZeroMemory(&pi, sizeof(PROCESS_INFORMATION));
+	if (CreateProcessAsUser(hExplorer, szProcessName, NULL, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+		cout << "create process successfully!" << endl;
+	}
+	CloseHandle(hExplorer);
+	*/
+
+	return 0;
+}
+
+void SetRegValue(HKEY hRootKey, LPCTSTR lpszSubKey, LPCTSTR lpszValueName, DWORD dwValueType, LPBYTE lpValue, DWORD dwValueLength) {
+	HKEY hKey = NULL;
+
+	do {
+		LONG lRet;
+		lRet = RegOpenKeyEx(hRootKey, lpszSubKey, 0, KEY_WRITE | KEY_READ, &hKey);
+		if (ERROR_SUCCESS != lRet) {
+			lRet = RegCreateKey(hRootKey, lpszSubKey, &hKey);
+			if (ERROR_SUCCESS != lRet)
+				break;
+		}
+		lRet = RegSetValueEx(hKey, lpszValueName, 0, dwValueType, lpValue, dwValueLength);
+	} while (0);
+	if (NULL != hKey)
+		RegCloseKey(hKey);
+}
+
+BOOL GetRegValue(HKEY hRootKey, LPCTSTR lpszSubKey, LPCTSTR lpszValueName, LPDWORD lpValueType, LPBYTE lpValue, LPDWORD lpValueLength) {
+	BOOL bRetVal = FALSE;
+	HKEY hKey = NULL;
+
+	do {
+		LONG lRet;
+		lRet = RegOpenKeyEx(hRootKey, lpszSubKey, 0, KEY_READ, &hKey);
+		if (ERROR_SUCCESS != lRet)
+			break;
+		lRet = RegQueryValueEx(hKey, lpszValueName, 0, lpValueType, lpValue, lpValueLength);
+		if (ERROR_SUCCESS != lRet)
+			break;
+		bRetVal = TRUE;
+	} while (0);
+	if (NULL != hKey)
+		RegCloseKey(hKey);
+	return bRetVal;
+}
