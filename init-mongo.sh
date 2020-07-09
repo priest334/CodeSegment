@@ -1,9 +1,11 @@
 #!/bin/bash
 
+dev=`ls /etc/sysconfig/network-scripts/ifcfg*|grep -v ifcfg-lo|sed -nr 's/.*ifcfg-(.*)/\1/;1p'`
+ip=`ip addr show $dev|grep inet|sed -nr 's/.*inet ([0-9\.]+)\/.*/\1/p'`
+
 mongo_bin_dir=$(dirname $(which mongo))
 service_name=mongo-logs
 root_dir=$(pwd)
-ip=`ip addr show eth0|grep inet|sed -nr 's/.*inet ([0-9\.]+)\/.*/\1/p'`
 first_shard=shard1
 
 mongo_shard1_dir="$root_dir"/shards/"$first_shard"
